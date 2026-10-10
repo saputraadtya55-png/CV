@@ -1,0 +1,60 @@
+<video id="cam" autoplay playsinline></video>
+<canvas id="frame"></canvas>
+
+<button onclick="prosesFoto()">Take Photo</button>
+
+<p id="hasilKecerahan">Kecerahan: -</p>
+
+<script>
+  // Jalankan kamera saat halaman dimuat
+  mulaiKamera();
+
+  async function mulaiKamera() {
+    try {
+      const video = document.getElementById('cam');
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      await video.play();
+    } catch (err) {
+      console.error("Gagal mengakses kamera:", err);
+    }
+  }
+
+  function ambilFrame(videoId, canvasId) {
+    const video = document.getElementById(videoId);
+    const canvas = document.getElementById(canvasId);
+    const ctx = canvas.getContext('2d');
+
+    // Sesuaikan ukuran canvas dengan resolusi asli video
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    // Gambar frame video ke canvas
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Ambil data piksel
+    return ctx.getImageData(0, 0, canvas.width, canvas.height);
+  }
+
+  // Hitung rata-rata kecerahan (skala 0 - 255)
+  function rataKecerahan(imageData) {
+    const d = imageData.data;
+    let total = 0;
+
+    for (let i = 0; i < d.length; i += 4) {
+      // Nilai R, G, B
+      total += (d[i] + d[i + 1] + d[i + 2]) / 3;
+    }
+
+    return total / (d.length / 4);
+  }
+
+  // Fungsi pembantu untuk tombol
+  function prosesFoto() {
+    const imageData = ambilFrame('cam', 'frame');
+    const kecerahan = rataKecerahan(imageData);
+
+    document.getElementById('hasilKecerahan').innerText =
+      'Kecerahan: ' + kecerahan.toFixed(2) + ' / 255';
+  }
+</script>
