@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pendeteksi Objek Real-Time</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- TensorFlow.js and COCO-SSD Model -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Custom scrollbar for activity log */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #1f2937;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #4b5563;
+        }
+        /* Pulse border effect for active detection alert */
+        @keyframes alertPulse {
+            0%, 100% { border-color: rgba(239, 68, 68, 0.8); box-shadow: 0 0 15px rgba(239, 68, 68, 0.5); }
+            50% { border-color: rgba(239, 68, 68, 0.3); box-shadow: 0 0 5px rgba(239, 68, 68, 0.2); }
+        }
+        .alert-active {
+            animation: alertPulse 1.5s infinite;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between">
+
+    <!-- Header Section -->
+    <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="bg-indigo-600 p-2 rounded-lg text-white shadow-lg shadow-indigo-600/30">
+                    <i data-lucide="scan-face" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight text-white">VisionDetect AI</h1>
+                    <p class="text-xs text-slate-400">Pendeteksi Objek Real-time di Browser</p>
+                </div>
+            </div>
+            
+            <!-- Status Badge -->
+            <div id="statusBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs text-slate-300">
+                <span id="statusDot" class="w-2.5 h-2.5 rounded-full bg-yellow-500 animate-pulse"></span>
+                <span id="statusText">Memuat Model...</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-7xl mx-auto w-full p-4 md:p-6 flex-grow grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Left Column: Camera Preview and Canvas -->
+        <div class="lg:col-span-2 flex flex-col gap-4">
+            
+            <!-- Camera View Box -->
+            <div id="videoContainer" class="relative bg-slate-900 rounded-2xl overflow-hidden border-2 border-slate-800 shadow-2xl aspect-video flex items-center justify-center transition-all duration-300">
+                
+                <!-- Placeholder / Loading indicator -->
+                <div id="cameraPlaceholder" class="flex flex-col items-center justify-center text-slate-500 gap-3 p-6 text-center">
+                    <i data-lucide="camera-off" class="w-16 h-16 stroke-[1.5]"></i>
+                    <p class="text-sm">Kamera mati. Klik <b>"Mulai Kamera"</b> untuk mengaktifkan pendeteksian.</p>
+                </div>
+
+                <!-- Video Element -->
+                <video id="webcam" class="absolute inset-0 w-full h-full object-contain hidden" playsinline muted></video>
+
+                <!-- Canvas Layer for Draw Labels -->
+                <canvas id="canvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none hidden"></canvas>
+
+                <!-- Alert Visual Overlay -->
+                <div id="alertOverlay" class="absolute top-4 left-1/2 -translate-x-1/2 bg-red-600/90 text-white px-4 py-2 rounded-full text-xs font-semibold tracking-wide shadow-lg flex items-center gap-2 transition-all duration-300 opacity-0 pointer-events-none transform -translate-y-4">
+                    <i data-lucide="alert-triangle" class="w-4 h-4 animate-bounce"></i>
+                    <span id="alertText">Objek Terdeteksi!</span>
+                </div>
+
+                <!-- Live Info Tag Overlay -->
+                <div id="fpsCounter" class="absolute bottom-3 left-3 bg-slate-900/80 backdrop-blur border border-slate-700 text-slate-300 text-xs px-2.5 py-1 rounded-md hidden">
+                    FPS: <span id="fpsValue" class="font-mono text-emerald-400">0</span> | Objek: <span id="countValue" class="font-mono text-indigo-400">0</span>
+                </div>
+            </div>
+
+            <!-- Controls Panel -->
+            <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                
+                <!-- Toggle Camera Button -->
+                <button id="toggleCamBtn" disabled class="col-span-1 sm:col-span-2 md:col-span-1 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-medium py-2.5 px-4 rounded-lg transition-all shadow-md shadow-indigo-600/20 active:scale-95">
+                    <i data-lucide="video" class="w-4 h-4"></i>
+                    <span id="camBtnText">Mulai Kamera</span>
+                </button>
+
+                <!-- Threshold Slider -->
+                <div class="flex flex-col gap-1">
+                    <div class="flex justify-between text-xs text-slate-400">
+                        <label for="thresholdSelect">Akurasi Min.</label>
+                        <span id="thresholdVal" class="text-indigo-400 font-medium">60%</span>
+                    </div>
+                    <input type="range" id="thresholdSelect" min="0.3" max="0.9" step="0.05" value="0.6" class="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 mt-2">
+                </div>
+
+                <!-- Target Filter Selection -->
+                <div class="flex flex-col gap-1">
+                    <label for="filterSelect" class="text-xs text-slate-400">Filter Objek</label>
+                    <select id="filterSelect" class="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <option value="all">Semua Objek</option>
+                        <option value="person">Manusia (Person)</option>
+                        <option value="cell phone">HP (Cell Phone)</option>
+                        <option value="car">Mobil (Car)</option>
+                        <option value="motorcycle">Motor (Motorcycle)</option>
+                        <option value="dog">Anjing (Dog)</option>
+                        <option value="cat">Kucing (Cat)</option>
+                        <option value="laptop">Laptop</option>
+                        <option value="chair">Kursi (Chair)</option>
+                        <option value="bottle">Botol (Bottle)</option>
+                    </select>
+                </div>
+
+                <!-- Quick Notification Toggles -->
+                <div class="flex items-center justify-around bg-slate-950/60 rounded-lg p-1 border border-slate-800">
+                    <!-- Audio Toggle -->
+                    <button id="audioToggleBtn" title="Toggle Suara Peringatan" class="p-2 text-slate-400 hover:text-emerald-400 transition-colors rounded-md bg-slate-800/50">
+                        <i data-lucide="volume-2" class="w-5 h-5"></i>
+                    </button>
+                    <div class="h-4 w-px bg-slate-800"></div>
+                    <!-- Desktop Notification Toggle -->
+                    <button id="desktopNotifBtn" title="Aktifkan Notifikasi Desktop Browser" class="p-2 text-slate-400 hover:text-indigo-400 transition-colors rounded-md bg-slate-800/50">
+                        <i data-lucide="bell" class="w-5 h-5"></i>
+                    </button>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Right Column: Notification & Activity Logs Panel -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col h-[500px] lg:h-auto shadow-lg">
+            
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="history" class="w-5 h-5 text-indigo-400"></i>
+                    <h2 class="font-semibold text-slate-200 text-sm">Log Deteksi Objek</h2>
+                </div>
+                <button id="clearLogBtn" class="text-xs text-slate-500 hover:text-slate-300 transition-colors flex items-center gap-1">
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                    Bersihkan
+                </button>
+            </div>
+
+            <!-- Log List Container -->
+            <div id="logContainer" class="flex-grow overflow-y-auto custom-scrollbar flex flex-col gap-2 pr-1">
+                <!-- Log Empty State -->
+                <div id="emptyLog" class="h-full flex flex-col items-center justify-center text-slate-600 gap-2">
+                    <i data-lucide="inbox" class="w-10 h-10 stroke-1"></i>
+                    <p class="text-xs">Belum ada objek terdeteksi.</p>
+                </div>
+            </div>
+
+            <!-- Status Indicator Bottom -->
+            <div class="mt-3 pt-3 border-t border-slate-800 text-[11px] text-slate-500 flex justify-between items-center">
+                <span>Audio: <b id="audioStatusText" class="text-emerald-400">ON</b></span>
+                <span>Desktop Notif: <b id="desktopStatusText" class="text-slate-500">OFF</b></span>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800 py-3 text-center text-xs text-slate-500 bg-slate-950">
+        VisionDetect AI &copy; 2026 - Didukung oleh TensorFlow.js COCO-SSD
+    </footer>
+
+    <!-- JavaScript Logic -->
+    <script>
+        // Global variables state
+        let model = null;
+        let isCameraRunning = false;
+        let videoStream = null;
+        let audioEnabled = true;
+        let desktopNotifEnabled = false;
+        let minConfidence = 0.6;
+        let targetFilter = 'all';
+        
+        let lastDetectedObjects = new Set();
+        let lastSoundTime = 0;
+        let frameCount = 0;
+        let lastFpsUpdate = Date.now();
+
+        // DOM Elements
+        const webcam = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const toggleCamBtn = document.getElementById('toggleCamBtn');
+        const camBtnText = document.getElementById('camBtnText');
+        const cameraPlaceholder = document.getElementById('cameraPlaceholder');
+        const videoContainer = document.getElementById('videoContainer');
+        const statusBadge = document.getElementById('statusBadge');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const logContainer = document.getElementById('logContainer');
+        const emptyLog = document.getElementById('emptyLog');
+        const clearLogBtn = document.getElementById('clearLogBtn');
+        const thresholdSelect = document.getElementById('thresholdSelect');
+        const thresholdVal = document.getElementById('thresholdVal');
+        const filterSelect = document.getElementById('filterSelect');
+        const audioToggleBtn = document.getElementById('audioToggleBtn');
+        const desktopNotifBtn = document.getElementById('desktopNotifBtn');
+        const audioStatusText = document.getElementById('audioStatusText');
+        const desktopStatusText = document.getElementById('desktopStatusText');
+        const alertOverlay = document.getElementById('alertOverlay');
+        const alertText = document.getElementById('alertText');
+        const fpsCounter = document.getElementById('fpsCounter');
+        const fpsValue = document.getElementById('fpsValue');
+        const countValue = document.getElementById('countValue');
+
+        // Web Audio API context initialization
+        let audioCtx = null;
+
+        function playBeepSound() {
+            if (!audioEnabled) return;
+            try {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, audioCtx.currentTime); // Pitch A5
+                gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.2);
+            } catch (e) {
+                console.warn("Gagal memutar audio:", e);
+            }
+        }
+
+        // Initialize Lucide Icons
+        lucide.createIcons();
+
+        // 1. Load COCO-SSD Model on Page Load
+        async function loadModel() {
+            try {
+                statusText.innerText = "Mengunduh Model...";
+                model = await cocoSsd.load();
+                
+                statusText.innerText = "Sistem Siap";
+                statusDot.classList.remove('bg-yellow-500');
+                statusDot.classList.add('bg-emerald-500');
+                toggleCamBtn.disabled = false;
+            } catch (err) {
+                console.error("Gagal memuat model COCO-SSD:", err);
+                statusText.innerText = "Gagal Memuat Model";
+                statusDot.classList.remove('bg-yellow-500');
+                statusDot.classList.add('bg-red-500');
+            }
+        }
+        loadModel();
+
+        // 2. Camera Start/Stop Handlers
+        toggleCamBtn.addEventListener('click', () => {
+            if (isCameraRunning) {
+                stopCamera();
+            } else {
+                startCamera();
+            }
+        });
+
+        async function startCamera() {
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                });
+
+                webcam.srcObject = videoStream;
+                await webcam.play();
+
+                isCameraRunning = true;
+                webcam.classList.remove('hidden');
+                canvas.classList.remove('hidden');
+                cameraPlaceholder.classList.add('hidden');
+                fpsCounter.classList.remove('hidden');
+
+                camBtnText.innerText = "Hentikan Kamera";
+                toggleCamBtn.classList.remove('bg-indigo-600', 'hover:bg-indigo-500');
+                toggleCamBtn.classList.add('bg-red-600', 'hover:bg-red-500');
+
+                // Resize Canvas dimensions to match Video stream
+                webcam.addEventListener('loadedmetadata', resizeCanvas);
+                resizeCanvas();
+
+                // Start Detection Loop
+                detectObjects();
+            } catch (err) {
+                console.error("Akses Kamera Ditolak / Tidak Ditemukan:", err);
+                alert("Gagal mengakses kamera. Pastikan izin kamera telah diberikan.");
+            }
+        }
+
+        function stopCamera() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                videoStream = null;
+            }
+
+            isCameraRunning = false;
+            webcam.classList.add('hidden');
+            canvas.classList.add('hidden');
+            cameraPlaceholder.classList.remove('hidden');
+            fpsCounter.classList.add('hidden');
+
+            camBtnText.innerText = "Mulai Kamera";
+            toggleCamBtn.classList.remove('bg-red-600', 'hover:bg-red-500');
+            toggleCamBtn.classList.add('bg-indigo-600', 'hover:bg-indigo-500');
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            hideAlertOverlay();
+            lastDetectedObjects.clear();
+        }
+
+        function resizeCanvas() {
+            if (webcam.videoWidth && webcam.videoHeight) {
+                canvas.width = webcam.videoWidth;
+                canvas.height = webcam.videoHeight;
+            }
+        }
+
+        // 3. Object Detection & Drawing Loop
+        async function detectObjects() {
+            if (!isCameraRunning) return;
+
+            // Calculate FPS
+            frameCount++;
+            const now = Date.now();
+            if (now - lastFpsUpdate >= 1000) {
+                fpsValue.innerText = frameCount;
+                frameCount = 0;
+                lastFpsUpdate = now;
+            }
+
+            // Perform prediction
+            const predictions = await model.detect(webcam);
+
+            // Filter predictions based on confidence threshold and label filter
+            const filteredPredictions = predictions.filter(pred => {
+                const matchesScore = pred.score >= minConfidence;
+                const matchesFilter = (targetFilter === 'all') || (pred.class.toLowerCase() === targetFilter.toLowerCase());
+                return matchesScore && matchesFilter;
+            });
+
+            // Update Count Display
+            countValue.innerText = filteredPredictions.length;
+
+            // Clear previous canvas frame
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const currentDetectedClasses = new Set();
+
+            // Render Bounding Boxes & Labels
+            filteredPredictions.forEach(prediction => {
+                const [x, y, width, height] = prediction.bbox;
+                const label = prediction.class;
+                const score = Math.round(prediction.score * 100);
+
+                currentDetectedClasses.add(label);
+
+                // Draw bounding box rectangle
+                ctx.strokeStyle = '#6366f1'; // Indigo border
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.roundRect(x, y, width, height, 8);
+                ctx.stroke();
+
+                // Draw background tag for text
+                ctx.fillStyle = '#6366f1';
+                const text = `${label} ${score}%`;
+                ctx.font = 'bold 14px Inter, sans-serif';
+                const textWidth = ctx.measureText(text).width;
+                ctx.fillRect(x, y > 25 ? y - 25 : y, textWidth + 12, 24);
+
+                // Draw label text
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(text, x + 6, y > 25 ? y - 8 : y + 16);
+            });
+
+            // Check for NEW detected objects to trigger notifications
+            let newObjectFound = false;
+            let newlyFoundLabels = [];
+
+            currentDetectedClasses.forEach(objLabel => {
+                if (!lastDetectedObjects.has(objLabel)) {
+                    newObjectFound = true;
+                    newlyFoundLabels.push(objLabel);
+                }
+            });
+
+            if (newObjectFound) {
+                triggerNotifications(newlyFoundLabels);
+            }
+
+            // Show or Hide visual alert overlay based on active detections
+            if (filteredPredictions.length > 0) {
+                showAlertOverlay(`Terdeteksi: ${Array.from(currentDetectedClasses).join(', ')}`);
+            } else {
+                hideAlertOverlay();
+            }
+
+            // Update tracked objects state
+            lastDetectedObjects = currentDetectedClasses;
+
+            // Loop next frame
+            if (isCameraRunning) {
+                requestAnimationFrame(detectObjects);
+            }
+        }
+
+        // 4. Notifications & Alerts System
+        function triggerNotifications(newObjects) {
+            const timeStr = new Date().toLocaleTimeString('id-ID');
+            const objectsText = newObjects.join(', ');
+
+            // Play audio beep sound (throttled to max 1 sound per second)
+            const currentTime = Date.now();
+            if (currentTime - lastSoundTime > 1000) {
+                playBeepSound();
+                lastSoundTime = currentTime;
+            }
+
+            // Log activity to panel
+            addLogEntry(timeStr, objectsText);
+
+            // Send Desktop Browser Notification if allowed
+            if (desktopNotifEnabled && Notification.permission === "granted") {
+                new Notification("VisionDetect: Objek Ditemukan!", {
+                    body: `Objek baru terdeteksi: ${objectsText}`,
+                    icon: "https://cdn-icons-png.flaticon.com/512/1179/1179120.png"
+                });
+            }
+        }
+
+        function addLogEntry(time, text) {
+            if (emptyLog) emptyLog.remove();
+
+            const item = document.createElement('div');
+            item.className = "flex items-start justify-between bg-slate-800/60 border border-slate-700/50 p-2.5 rounded-lg text-xs transition-all animate-fadeIn";
+            item.innerHTML = `
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-indigo-400"></span>
+                    <span class="text-slate-200 font-medium capitalize">${text}</span>
+                </div>
+                <span class="text-[10px] text-slate-500 font-mono">${time}</span>
+            `;
+
+            logContainer.prepend(item);
+        }
+
+        function showAlertOverlay(msg) {
+            alertText.innerText = msg;
+            alertOverlay.classList.remove('opacity-0', '-translate-y-4');
+            alertOverlay.classList.add('opacity-100', 'translate-y-0');
+            videoContainer.classList.add('alert-active');
+        }
+
+        function hideAlertOverlay() {
+            alertOverlay.classList.remove('opacity-100', 'translate-y-0');
+            alertOverlay.classList.add('opacity-0', '-translate-y-4');
+            videoContainer.classList.remove('alert-active');
+        }
+
+        // 5. Controls & Toggles Event Handlers
+        thresholdSelect.addEventListener('input', (e) => {
+            minConfidence = parseFloat(e.target.value);
+            thresholdVal.innerText = `${Math.round(minConfidence * 100)}%`;
+        });
+
+        filterSelect.addEventListener('change', (e) => {
+            targetFilter = e.target.value;
+        });
+
+        audioToggleBtn.addEventListener('click', () => {
+            audioEnabled = !audioEnabled;
+            if (audioEnabled) {
+                audioToggleBtn.classList.replace('text-slate-500', 'text-slate-400');
+                audioStatusText.innerText = "ON";
+                audioStatusText.className = "text-emerald-400";
+            } else {
+                audioToggleBtn.classList.replace('text-slate-400', 'text-slate-500');
+                audioStatusText.innerText = "OFF";
+                audioStatusText.className = "text-slate-500";
+            }
+        });
+
+        desktopNotifBtn.addEventListener('click', async () => {
+            if (!("Notification" in window)) {
+                alert("Browser Anda tidak mendukung Notifikasi Desktop.");
+                return;
+            }
+
+            if (Notification.permission === "granted") {
+                desktopNotifEnabled = !desktopNotifEnabled;
+            } else if (Notification.permission !== "denied") {
+                const permission = await Notification.requestPermission();
+                if (permission === "granted") {
+                    desktopNotifEnabled = true;
+                }
+            } else {
+                alert("Izin notifikasi diblokir di browser Anda. Harap izinkan secara manual di pengaturan browser.");
+                return;
+            }
+
+            if (desktopNotifEnabled) {
+                desktopNotifBtn.classList.add('text-indigo-400');
+                desktopStatusText.innerText = "ON";
+                desktopStatusText.className = "text-indigo-400";
+            } else {
+                desktopNotifBtn.classList.remove('text-indigo-400');
+                desktopStatusText.innerText = "OFF";
+                desktopStatusText.className = "text-slate-500";
+            }
+        });
+
+        clearLogBtn.addEventListener('click', () => {
+            logContainer.innerHTML = `
+                <div id="emptyLog" class="h-full flex flex-col items-center justify-center text-slate-600 gap-2">
+                    <i data-lucide="inbox" class="w-10 h-10 stroke-1"></i>
+                    <p class="text-xs">Belum ada objek terdeteksi.</p>
+                </div>
+            `;
+            lucide.createIcons();
+        });
+    </script>
+</body>
+</html>
