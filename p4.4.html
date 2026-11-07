@@ -116,6 +116,9 @@
                         <button id="toggleAutoAttendBtn" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-medium rounded-lg transition shadow-md shadow-indigo-600/20">
                             <i class="fa-solid fa-bolt mr-1"></i> Auto Presensi: ON
                         </button>
+                        <button id="toggleSoundBtn" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-medium rounded-lg transition shadow-md shadow-indigo-600/20" title="Aktifkan/Matikan Suara">
+                            <i class="fa-solid fa-volume-high mr-1"></i> Suara: ON
+                        </button>
                     </div>
                     <div class="text-xs text-slate-400">
                         Ambang Batas Vektor: <span id="thresholdVal" class="text-indigo-400 font-semibold">0.40</span>
@@ -123,14 +126,14 @@
                 </div>
             </div>
 
-            <!-- Enrollment Form Section -->
+            <!-- Enrollment Form Section with 3-Pose Capture -->
             <div class="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-xl">
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center space-x-2">
                         <i class="fa-solid fa-user-plus text-indigo-400"></i>
-                        <h2 class="font-semibold text-sm tracking-wide text-slate-200">Pendaftaran Pengguna Baru (Enrollment)</h2>
+                        <h2 class="font-semibold text-sm tracking-wide text-slate-200">Pendaftaran Pengguna Baru (3 Sampel Pose Wajah)</h2>
                     </div>
-                    <span class="text-xs bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded">Vector 468 Points</span>
+                    <span class="text-xs bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded">3 Multi-Vector Poses</span>
                 </div>
 
                 <form id="enrollForm" class="space-y-4">
@@ -148,11 +151,36 @@
                         <label class="block text-xs font-medium text-slate-400 mb-1">Jabatan / Departemen</label>
                         <input type="text" id="enrollDept" placeholder="Contoh: Software Engineer" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
                     </div>
-                    <div class="flex items-center justify-end space-x-3 pt-2">
-                        <p id="enrollMsg" class="text-xs font-medium hidden"></p>
-                        <button type="submit" id="enrollBtn" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition shadow-md shadow-emerald-600/20 flex items-center space-x-1.5">
+
+                    <!-- 3 Pose Step-by-Step Progress & Status -->
+                    <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-700/80">
+                        <div class="text-xs text-slate-400 mb-2 font-medium">Panduan Pengambilan 3 Sampel Pose:</div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div id="stepCard1" class="p-2 rounded-lg border border-slate-700 bg-slate-800 text-center transition">
+                                <div class="text-[10px] text-slate-400 uppercase font-semibold">Pose 1</div>
+                                <div class="text-xs font-bold text-slate-200 mt-0.5">Depan (Lurus)</div>
+                                <div id="stepBadge1" class="mt-1 text-[10px] text-slate-500"><i class="fa-regular fa-circle"></i> Belum</div>
+                            </div>
+                            <div id="stepCard2" class="p-2 rounded-lg border border-slate-700 bg-slate-800 text-center transition">
+                                <div class="text-[10px] text-slate-400 uppercase font-semibold">Pose 2</div>
+                                <div class="text-xs font-bold text-slate-200 mt-0.5">Miring Kiri</div>
+                                <div id="stepBadge2" class="mt-1 text-[10px] text-slate-500"><i class="fa-regular fa-circle"></i> Belum</div>
+                            </div>
+                            <div id="stepCard3" class="p-2 rounded-lg border border-slate-700 bg-slate-800 text-center transition">
+                                <div class="text-[10px] text-slate-400 uppercase font-semibold">Pose 3</div>
+                                <div class="text-xs font-bold text-slate-200 mt-0.5">Miring Kanan</div>
+                                <div id="stepBadge3" class="mt-1 text-[10px] text-slate-500"><i class="fa-regular fa-circle"></i> Belum</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between pt-1">
+                        <button type="button" id="resetEnrollBtn" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium rounded-lg transition">
+                            Reset Sampel
+                        </button>
+                        <button type="submit" id="enrollBtn" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition shadow-md shadow-indigo-600/20 flex items-center space-x-1.5">
                             <i class="fa-solid fa-camera"></i>
-                            <span>Ambil Vektor & Simpan</span>
+                            <span id="enrollBtnText">Ambil Pose 1 (Depan)</span>
                         </button>
                     </div>
                 </form>
@@ -243,8 +271,7 @@
         let db = null;
 
         // Vector Distance Threshold for Face Landmark Embeddings Similarity
-        // Lower Euclidean distance means higher similarity. Standard normalized threshold: ~0.35 - 0.45
-        const DISTANCE_THRESHOLD = 0.42; 
+        const DISTANCE_THRESHOLD = 0.40; 
         const COOLDOWN_MS = 10000; // 10 seconds cool down between duplicate auto attendance logs
 
         let enrolledUsers = [];
@@ -252,7 +279,14 @@
         let isFaceMeshReady = false;
         let drawMeshEnabled = true;
         let autoAttendEnabled = true;
+        let soundEnabled = true; // Audio feedback toggle state
         let lastAttendanceMap = new Map(); // Store last attendance timestamp per user ID
+
+        // Audio Context for synthesized beep sounds
+        let audioCtx = null;
+
+        // 3-Sample Pose Capture State
+        let capturedPoseVectors = []; // Stores up to 3 vector samples during enrollment
 
         // MediaPipe FaceMesh & Camera Instances
         let faceMesh = null;
@@ -357,11 +391,63 @@
                 renderAttendanceLogs();
                 showToast('Presensi Terekam', `${userName} berhasil melakukan presensi.`, 'success');
                 
+                // Play Audio Beep & Text-to-Speech Greeting
+                playAttendanceAudio(userName);
+
                 // Visual Indicator Flash
                 const badge = document.getElementById('attendanceBadge');
                 badge.classList.remove('hidden');
                 setTimeout(() => badge.classList.add('hidden'), 3000);
             };
+        }
+
+        /**
+         * Play Beep Sound (Web Audio API) & Speech Greeting (Web Speech API)
+         */
+        function playAttendanceAudio(userName) {
+            if (!soundEnabled) return;
+
+            // 1. Web Audio API Beep Tone
+            try {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, audioCtx.currentTime); // 880Hz pitch (A5 note)
+                osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.15); // Rising success chime
+                gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.3);
+            } catch (err) {
+                console.warn('Audio tone error:', err);
+            }
+
+            // 2. Text-to-Speech Greeting (SpeechSynthesis API)
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel(); // Cancel any ongoing speech
+                const speechText = `Presensi berhasil. Selamat datang, ${userName}`;
+                const utterance = new SpeechSynthesisUtterance(speechText);
+                utterance.lang = 'id-ID';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+
+                // Try selecting Indonesian voice if available
+                const voices = window.speechSynthesis.getVoices();
+                const idVoice = voices.find(v => v.lang.includes('id') || v.lang.includes('ID'));
+                if (idVoice) utterance.voice = idVoice;
+
+                window.speechSynthesis.speak(utterance);
+            }
         }
 
         /**
@@ -451,7 +537,9 @@
                 return;
             }
 
-            listEl.innerHTML = enrolledUsers.map(user => `
+            listEl.innerHTML = enrolledUsers.map(user => {
+                const vectorCount = Array.isArray(user.vectors) ? user.vectors.length : (user.vector ? 1 : 0);
+                return `
                 <li class="flex items-center justify-between p-2 rounded-xl bg-slate-900/60 border border-slate-700/50 hover:border-slate-600 transition">
                     <div class="flex items-center space-x-2.5">
                         <div class="w-8 h-8 rounded-full bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 font-bold flex items-center justify-center text-xs">
@@ -462,11 +550,14 @@
                             <div class="text-[10px] text-slate-400 font-mono">${escapeHtml(user.id)} &bull; ${escapeHtml(user.dept || 'Umum')}</div>
                         </div>
                     </div>
-                    <button onclick="deleteUserFromDB('${user.id}')" class="text-slate-500 hover:text-rose-400 p-1.5 transition">
-                        <i class="fa-solid fa-user-xmark text-xs"></i>
-                    </button>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-[10px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium">${vectorCount} Pose</span>
+                        <button onclick="deleteUserFromDB('${user.id}')" class="text-slate-500 hover:text-rose-400 p-1.5 transition">
+                            <i class="fa-solid fa-user-xmark text-xs"></i>
+                        </button>
+                    </div>
                 </li>
-            `).join('');
+            `}).join('');
         }
 
         /**
@@ -531,7 +622,7 @@
         }
 
         /**
-         * Compare live landmark vector against stored user embeddings
+         * Compare live landmark vector against stored user embeddings across all multi-pose vectors
          */
         function recognizeFace(liveVector) {
             if (enrolledUsers.length === 0 || !liveVector) return null;
@@ -540,13 +631,17 @@
             let matchedUser = null;
 
             for (const user of enrolledUsers) {
-                // Ensure array conversion
-                const storedVec = new Float32Array(user.vector);
-                const distance = calculateVectorDistance(liveVector, storedVec);
+                // Support multi-vector format (vectors array) or legacy single-vector format (vector)
+                const userVectors = user.vectors || (user.vector ? [user.vector] : []);
 
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    matchedUser = user;
+                for (const vecArray of userVectors) {
+                    const storedVec = new Float32Array(vecArray);
+                    const distance = calculateVectorDistance(liveVector, storedVec);
+
+                    if (distance < minDistance) {
+                        minDistance = distance;
+                        matchedUser = user;
+                    }
                 }
             }
 
@@ -735,8 +830,45 @@
             // Initialize MediaPipe FaceMesh engine
             setupMediaPipe();
 
-            // User Enrollment Form Submission
+            // User Enrollment 3-Step Pose Collection Handler
             const enrollForm = document.getElementById('enrollForm');
+            const resetEnrollBtn = document.getElementById('resetEnrollBtn');
+
+            function updateEnrollStepUI() {
+                const stepCount = capturedPoseVectors.length;
+                const btnText = document.getElementById('enrollBtnText');
+
+                for (let i = 1; i <= 3; i++) {
+                    const card = document.getElementById(`stepCard${i}`);
+                    const badge = document.getElementById(`stepBadge${i}`);
+                    
+                    if (i <= stepCount) {
+                        card.className = "p-2 rounded-lg border border-emerald-500/50 bg-emerald-500/10 text-center transition";
+                        badge.className = "mt-1 text-[10px] text-emerald-400 font-semibold";
+                        badge.innerHTML = `<i class="fa-solid fa-check"></i> Terambil`;
+                    } else if (i === stepCount + 1) {
+                        card.className = "p-2 rounded-lg border border-indigo-500 bg-indigo-500/20 text-center transition ring-1 ring-indigo-500";
+                        badge.className = "mt-1 text-[10px] text-indigo-300 font-semibold";
+                        badge.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> Siap`;
+                    } else {
+                        card.className = "p-2 rounded-lg border border-slate-700 bg-slate-800 text-center transition";
+                        badge.className = "mt-1 text-[10px] text-slate-500";
+                        badge.innerHTML = `<i class="fa-regular fa-circle"></i> Belum`;
+                    }
+                }
+
+                if (stepCount === 0) btnText.textContent = "Ambil Pose 1 (Depan)";
+                else if (stepCount === 1) btnText.textContent = "Ambil Pose 2 (Miring Kiri)";
+                else if (stepCount === 2) btnText.textContent = "Ambil Pose 3 (Miring Kanan)";
+                else btnText.textContent = "Simpan Data Pengguna";
+            }
+
+            resetEnrollBtn.addEventListener('click', () => {
+                capturedPoseVectors = [];
+                updateEnrollStepUI();
+                showToast('Reset Sampel', 'Sampel pose telah di-reset.', 'info');
+            });
+
             enrollForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 const id = document.getElementById('enrollId').value.trim();
@@ -748,29 +880,31 @@
                     return;
                 }
 
-                // Check duplicate ID
-                const existing = enrolledUsers.find(u => u.id === id);
-                if (existing) {
-                    if (!confirm(`Pengguna dengan ID "${id}" sudah ada. Apakah Anda ingin memperbarui data wajah?`)) {
-                        return;
-                    }
+                // Collect step poses up to 3
+                if (capturedPoseVectors.length < 3) {
+                    const vectorArray = Array.from(currentLandmarksVector);
+                    capturedPoseVectors.push(vectorArray);
+                    showToast(`Pose ${capturedPoseVectors.length} Saved`, `Pose ${capturedPoseVectors.length} berhasil diambil.`, 'success');
+                    updateEnrollStepUI();
+
+                    if (capturedPoseVectors.length < 3) return; // Wait for next poses
                 }
 
-                // Convert Float32Array vector to standard Array for IndexedDB storage
-                const vectorArray = Array.from(currentLandmarksVector);
-
+                // All 3 samples collected -> Save user to DB
                 const newUser = {
                     id: id,
                     name: name,
                     dept: dept,
-                    vector: vectorArray,
+                    vectors: capturedPoseVectors, // Array of 3 feature vectors
                     created: new Date().toISOString()
                 };
 
                 try {
                     await saveUserToDB(newUser);
-                    showToast('Pengguna Terdaftar', `Pengguna ${name} berhasil disimpan.`, 'success');
+                    showToast('Pengguna Terdaftar', `Pengguna ${name} dengan 3 pose sampel berhasil disimpan.`, 'success');
                     enrollForm.reset();
+                    capturedPoseVectors = [];
+                    updateEnrollStepUI();
                 } catch (err) {
                     console.error('Error saving user:', err);
                     showToast('Gagal Menyimpan', 'Terjadi kesalahan saat menyimpan ke IndexedDB.', 'danger');
@@ -795,6 +929,22 @@
                 } else {
                     btn.className = 'px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-xs text-slate-300 font-medium rounded-lg transition border border-slate-600';
                     btn.innerHTML = `<i class="fa-solid fa-pause mr-1"></i> Auto Presensi: OFF`;
+                }
+            });
+
+            // Toggle Audio / Voice Feedback
+            document.getElementById('toggleSoundBtn').addEventListener('click', () => {
+                soundEnabled = !soundEnabled;
+                const btn = document.getElementById('toggleSoundBtn');
+                if (soundEnabled) {
+                    btn.className = 'px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-medium rounded-lg transition shadow-md shadow-indigo-600/20';
+                    btn.innerHTML = `<i class="fa-solid fa-volume-high mr-1"></i> Suara: ON`;
+                    showToast('Suara Aktif', 'Fitur konfirmasi suara dan ucapan diaktifkan.', 'info');
+                } else {
+                    btn.className = 'px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-xs text-slate-300 font-medium rounded-lg transition border border-slate-600';
+                    btn.innerHTML = `<i class="fa-solid fa-volume-xmark mr-1"></i> Suara: OFF`;
+                    window.speechSynthesis && window.speechSynthesis.cancel();
+                    showToast('Suara Dimatikan', 'Konfirmasi suara dinonaktifkan.', 'info');
                 }
             });
 
