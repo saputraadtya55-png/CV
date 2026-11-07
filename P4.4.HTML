@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Presensi Wajah (MediaPipe Face Landmarks)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe & Camera Utils CDNs -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Mirror effect for webcam preview */
+        .mirror {
+            transform: scaleX(-1);
+        }
+        /* Custom Scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col">
+
+    <!-- Header / Navbar -->
+    <header class="bg-slate-800 border-b border-slate-700 sticky top-0 z-50 shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="p-2 bg-indigo-600 rounded-lg text-white">
+                    <i class="fa-solid me-0 fa-id-card-clip text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight text-white">Presensi Wajah AI</h1>
+                    <p class="text-xs text-slate-400">MediaPipe 468 Landmarks Vector Matching</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-2">
+                <span id="systemStatus" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                    <span class="w-2 h-2 mr-1.5 bg-amber-400 rounded-full animate-pulse"></span> Memuat Model AI...
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- Left Column: Camera Feed & Realtime Recognition -->
+        <div class="lg:col-span-7 flex flex-col gap-6">
+            
+            <!-- Video & Canvas Box -->
+            <div class="bg-slate-800 rounded-2xl p-4 border border-slate-700 shadow-xl relative overflow-hidden">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-video text-indigo-400"></i>
+                        <h2 class="font-semibold text-sm tracking-wide text-slate-200">Kamera Real-time</h2>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <label for="cameraSelect" class="text-xs text-slate-400 hidden sm:inline">Pilih Kamera:</label>
+                        <select id="cameraSelect" class="bg-slate-900 border border-slate-700 text-xs rounded-lg px-2 py-1 text-slate-300 focus:ring-1 focus:ring-indigo-500">
+                            <option value="">Default Camera</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Video Viewport -->
+                <div class="relative w-full aspect-video bg-black rounded-xl overflow-hidden flex items-center justify-center border border-slate-700/50 group">
+                    <video id="webcam" class="w-full h-full object-cover mirror absolute inset-0" autoplay playsinline muted></video>
+                    <canvas id="outputCanvas" class="w-full h-full object-cover mirror absolute inset-0 z-10"></canvas>
+                    
+                    <!-- Overlay Overlay Status Box -->
+                    <div id="detectionOverlay" class="absolute bottom-3 left-3 right-3 z-20 bg-slate-900/80 backdrop-blur-md border border-slate-700/80 p-3 rounded-xl flex items-center justify-between transition-all">
+                        <div class="flex items-center space-x-3">
+                            <div id="userAvatar" class="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-slate-300 font-bold border border-slate-600">
+                                ?
+                            </div>
+                            <div>
+                                <h3 id="detectedName" class="font-bold text-sm text-slate-200">Menunggu Deteksi Wajah...</h3>
+                                <p id="detectedMatch" class="text-xs text-slate-400">Jarak Vektor: - | Akurasi: -</p>
+                            </div>
+                        </div>
+                        <div id="attendanceBadge" class="hidden px-3 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs font-semibold rounded-full flex items-center space-x-1">
+                            <i class="fa-solid fa-check-circle"></i>
+                            <span>Terekam</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Control Buttons -->
+                <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center space-x-2">
+                        <button id="toggleMeshBtn" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-xs text-slate-200 font-medium rounded-lg transition border border-slate-600">
+                            <i class="fa-solid fa-circle-nodes mr-1 text-indigo-400"></i> Toggle Mesh
+                        </button>
+                        <button id="toggleAutoAttendBtn" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-medium rounded-lg transition shadow-md shadow-indigo-600/20">
+                            <i class="fa-solid fa-bolt mr-1"></i> Auto Presensi: ON
+                        </button>
+                    </div>
+                    <div class="text-xs text-slate-400">
+                        Ambang Batas Vektor: <span id="thresholdVal" class="text-indigo-400 font-semibold">0.40</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Enrollment Form Section -->
+            <div class="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-xl">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-user-plus text-indigo-400"></i>
+                        <h2 class="font-semibold text-sm tracking-wide text-slate-200">Pendaftaran Pengguna Baru (Enrollment)</h2>
+                    </div>
+                    <span class="text-xs bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded">Vector 468 Points</span>
+                </div>
+
+                <form id="enrollForm" class="space-y-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-medium text-slate-400 mb-1">ID / NIP Pengguna</label>
+                            <input type="text" id="enrollId" required placeholder="Contoh: USR-001" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-slate-400 mb-1">Nama Lengkap</label>
+                            <input type="text" id="enrollName" required placeholder="Contoh: Budi Santoso" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-400 mb-1">Jabatan / Departemen</label>
+                        <input type="text" id="enrollDept" placeholder="Contoh: Software Engineer" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+                    </div>
+                    <div class="flex items-center justify-end space-x-3 pt-2">
+                        <p id="enrollMsg" class="text-xs font-medium hidden"></p>
+                        <button type="submit" id="enrollBtn" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg transition shadow-md shadow-emerald-600/20 flex items-center space-x-1.5">
+                            <i class="fa-solid fa-camera"></i>
+                            <span>Ambil Vektor & Simpan</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Right Column: Database Records & Log -->
+        <div class="lg:col-span-5 flex flex-col gap-6">
+            
+            <!-- Registered Users Card -->
+            <div class="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-xl flex flex-col max-h-[260px]">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-users text-indigo-400"></i>
+                        <h2 class="font-semibold text-sm tracking-wide text-slate-200">Pengguna Terdaftar</h2>
+                    </div>
+                    <span id="userCount" class="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300 font-medium">0 Pengguna</span>
+                </div>
+                <div class="overflow-y-auto flex-1 pr-1">
+                    <ul id="userList" class="space-y-2">
+                        <!-- User items populated dynamically -->
+                        <li class="text-xs text-slate-500 italic text-center py-4">Belum ada pengguna terdaftar.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Attendance Logs Table Card -->
+            <div class="bg-slate-800 rounded-2xl p-5 border border-slate-700 shadow-xl flex-1 flex flex-col min-h-[350px]">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-clipboard-user text-indigo-400"></i>
+                        <h2 class="font-semibold text-sm tracking-wide text-slate-200">Riwayat Presensi Wajah</h2>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button id="clearLogsBtn" title="Hapus Riwayat" class="p-1.5 bg-slate-700 hover:bg-rose-600/30 text-slate-400 hover:text-rose-400 rounded-lg transition text-xs border border-slate-600">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                        <button id="exportCsvBtn" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-xs text-slate-200 font-medium rounded-lg transition border border-slate-600 flex items-center space-x-1">
+                            <i class="fa-solid fa-file-csv text-emerald-400"></i>
+                            <span>Export CSV</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="overflow-y-auto flex-1 border border-slate-700/60 rounded-xl bg-slate-900/50">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="bg-slate-900 text-[11px] uppercase tracking-wider text-slate-400 sticky top-0 border-b border-slate-700">
+                            <tr>
+                                <th class="p-2.5">Waktu</th>
+                                <th class="p-2.5">Nama / ID</th>
+                                <th class="p-2.5 text-right">Kemiripan</th>
+                            </tr>
+                        </thead>
+                        <tbody id="attendanceTableBody" class="divide-y divide-slate-800 text-xs text-slate-300">
+                            <!-- Logs dynamically loaded -->
+                            <tr>
+                                <td colspan="3" class="text-center py-6 text-slate-500 italic">Belum ada catatan presensi.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-slate-900 border-t border-slate-800 py-3 text-center text-xs text-slate-500">
+        <p>Aplikasi Standalone Presensi Wajah Vector 468 Landmarks &bull; IndexedDB Local Storage &bull; MediaPipe AI</p>
+    </footer>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-slate-800 text-slate-100 border border-indigo-500/40 px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-3 pointer-events-none">
+        <i id="toastIcon" class="fa-solid fa-circle-info text-indigo-400 text-lg"></i>
+        <div>
+            <p id="toastTitle" class="font-semibold text-xs text-slate-200">Notifikasi</p>
+            <p id="toastMsg" class="text-xs text-slate-400">Pesan notifikasi.</p>
+        </div>
+    </div>
+
+    <!-- Application Script -->
+    <script>
+        /**
+         * System Configuration & Database Initialization (IndexedDB)
+         */
+        const DB_NAME = 'FaceAttendanceDB';
+        const DB_VERSION = 1;
+        let db = null;
+
+        // Vector Distance Threshold for Face Landmark Embeddings Similarity
+        // Lower Euclidean distance means higher similarity. Standard normalized threshold: ~0.35 - 0.45
+        const DISTANCE_THRESHOLD = 0.42; 
+        const COOLDOWN_MS = 10000; // 10 seconds cool down between duplicate auto attendance logs
+
+        let enrolledUsers = [];
+        let currentLandmarksVector = null; // Vector (468 points normalized array)
+        let isFaceMeshReady = false;
+        let drawMeshEnabled = true;
+        let autoAttendEnabled = true;
+        let lastAttendanceMap = new Map(); // Store last attendance timestamp per user ID
+
+        // MediaPipe FaceMesh & Camera Instances
+        let faceMesh = null;
+        let cameraInstance = null;
+
+        /**
+         * Initialize IndexedDB Database
+         */
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+                request.onupgradeneeded = (e) => {
+                    const database = e.target.result;
+                    // Store for user profile and landmark feature vectors
+                    if (!database.objectStoreNames.contains('users')) {
+                        database.createObjectStore('users', { keyPath: 'id' });
+                    }
+                    // Store for attendance history logs
+                    if (!database.objectStoreNames.contains('logs')) {
+                        const logStore = database.createObjectStore('logs', { keyPath: 'id', autoIncrement: true });
+                        logStore.createIndex('userId', 'userId', { unique: false });
+                        logStore.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                };
+
+                request.onsuccess = (e) => {
+                    db = e.target.result;
+                    console.log('IndexedDB initialized successfully.');
+                    resolve(db);
+                };
+
+                request.onerror = (e) => {
+                    console.error('IndexedDB error:', e.target.error);
+                    reject(e.target.error);
+                };
+            });
+        }
+
+        /**
+         * Load All Users from IndexedDB
+         */
+        async function loadUsers() {
+            if (!db) return;
+            const transaction = db.transaction(['users'], 'readonly');
+            const store = transaction.objectStore('users');
+            const request = store.getAll();
+
+            request.onsuccess = () => {
+                enrolledUsers = request.result || [];
+                renderUserList();
+            };
+        }
+
+        /**
+         * Save New User to IndexedDB
+         */
+        async function saveUserToDB(userObj) {
+            return new Promise((resolve, reject) => {
+                const transaction = db.transaction(['users'], 'readwrite');
+                const store = transaction.objectStore('users');
+                const request = store.put(userObj);
+
+                request.onsuccess = () => {
+                    loadUsers();
+                    resolve(true);
+                };
+                request.onerror = (e) => reject(e.target.error);
+            });
+        }
+
+        /**
+         * Delete User from IndexedDB
+         */
+        async function deleteUserFromDB(userId) {
+            if (!confirm(`Hapus pengguna ID: ${userId}?`)) return;
+            const transaction = db.transaction(['users'], 'readwrite');
+            const store = transaction.objectStore('users');
+            store.delete(userId).onsuccess = () => {
+                showToast('Pengguna Dihapus', `User ${userId} berhasil dihapus dari database.`, 'info');
+                loadUsers();
+            };
+        }
+
+        /**
+         * Save Attendance Log Record to IndexedDB
+         */
+        async function saveAttendanceLog(userId, userName, similarityScore) {
+            if (!db) return;
+            const now = new Date();
+            const logEntry = {
+                userId: userId,
+                userName: userName,
+                timestamp: now.toISOString(),
+                formattedTime: now.toLocaleString('id-ID'),
+                similarity: (similarityScore * 100).toFixed(1) + '%'
+            };
+
+            const transaction = db.transaction(['logs'], 'readwrite');
+            const store = transaction.objectStore('logs');
+            store.add(logEntry).onsuccess = () => {
+                renderAttendanceLogs();
+                showToast('Presensi Terekam', `${userName} berhasil melakukan presensi.`, 'success');
+                
+                // Visual Indicator Flash
+                const badge = document.getElementById('attendanceBadge');
+                badge.classList.remove('hidden');
+                setTimeout(() => badge.classList.add('hidden'), 3000);
+            };
+        }
+
+        /**
+         * Load and Render Attendance Logs
+         */
+        async function renderAttendanceLogs() {
+            if (!db) return;
+            const transaction = db.transaction(['logs'], 'readonly');
+            const store = transaction.objectStore('logs');
+            const request = store.getAll();
+
+            request.onsuccess = () => {
+                const logs = request.result || [];
+                logs.reverse(); // Show latest logs first
+
+                const tbody = document.getElementById('attendanceTableBody');
+                if (logs.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="3" class="text-center py-6 text-slate-500 italic">Belum ada catatan presensi.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = logs.map(log => `
+                    <tr class="hover:bg-slate-800/60 transition">
+                        <td class="p-2.5 text-slate-400 font-mono text-[11px]">${log.formattedTime}</td>
+                        <td class="p-2.5">
+                            <div class="font-medium text-slate-200">${escapeHtml(log.userName)}</div>
+                            <div class="text-[10px] text-slate-500 font-mono">${escapeHtml(log.userId)}</div>
+                        </td>
+                        <td class="p-2.5 text-right font-medium text-emerald-400">${log.similarity}</td>
+                    </tr>
+                `).join('');
+            };
+        }
+
+        /**
+         * Clear All Attendance Logs
+         */
+        async function clearAllLogs() {
+            if (!confirm('Apakah Anda yakin ingin menghapus semua riwayat presensi?')) return;
+            const transaction = db.transaction(['logs'], 'readwrite');
+            const store = transaction.objectStore('logs');
+            store.clear().onsuccess = () => {
+                renderAttendanceLogs();
+                showToast('Riwayat Dihapus', 'Semua riwayat presensi telah dibersihkan.', 'info');
+            };
+        }
+
+        /**
+         * Export Attendance Logs to CSV File
+         */
+        async function exportToCSV() {
+            if (!db) return;
+            const transaction = db.transaction(['logs'], 'readonly');
+            const store = transaction.objectStore('logs');
+            store.getAll().onsuccess = (e) => {
+                const logs = e.target.result || [];
+                if (logs.length === 0) {
+                    showToast('Export Gagal', 'Tidak ada data presensi untuk di-export.', 'warning');
+                    return;
+                }
+
+                let csvContent = "data:text/csv;charset=utf-8,ID Log,NIP/ID,Nama,Waktu Presensi,Akurasi Kemiripan\n";
+                logs.forEach(row => {
+                    csvContent += `"${row.id}","${row.userId}","${row.userName}","${row.formattedTime}","${row.similarity}"\n`;
+                });
+
+                const encodedUri = encodeURI(csvContent);
+                const link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", `Presensi_Wajah_${new Date().toISOString().slice(0,10)}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+        }
+
+        /**
+         * Render Enrolled Users List UI
+         */
+        function renderUserList() {
+            const listEl = document.getElementById('userList');
+            const countEl = document.getElementById('userCount');
+            countEl.textContent = `${enrolledUsers.length} Pengguna`;
+
+            if (enrolledUsers.length === 0) {
+                listEl.innerHTML = `<li class="text-xs text-slate-500 italic text-center py-4">Belum ada pengguna terdaftar.</li>`;
+                return;
+            }
+
+            listEl.innerHTML = enrolledUsers.map(user => `
+                <li class="flex items-center justify-between p-2 rounded-xl bg-slate-900/60 border border-slate-700/50 hover:border-slate-600 transition">
+                    <div class="flex items-center space-x-2.5">
+                        <div class="w-8 h-8 rounded-full bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 font-bold flex items-center justify-center text-xs">
+                            ${user.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                            <div class="font-medium text-xs text-slate-200">${escapeHtml(user.name)}</div>
+                            <div class="text-[10px] text-slate-400 font-mono">${escapeHtml(user.id)} &bull; ${escapeHtml(user.dept || 'Umum')}</div>
+                        </div>
+                    </div>
+                    <button onclick="deleteUserFromDB('${user.id}')" class="text-slate-500 hover:text-rose-400 p-1.5 transition">
+                        <i class="fa-solid fa-user-xmark text-xs"></i>
+                    </button>
+                </li>
+            `).join('');
+        }
+
+        /**
+         * --------------------------------------------------------------------------
+         * Face Feature Extraction & Vector Embedding Calculations (468 Keypoints)
+         * --------------------------------------------------------------------------
+         */
+
+        /**
+         * Normalization of 468 Face Landmarks Coordinates into Scale & Translation Invariant Feature Vector
+         * Extract normalized 3D coordinates relative to face centroid and scale.
+         */
+        function normalizeFaceVector(landmarks) {
+            // Calculate Centroid (Mean center of all 468 points)
+            let cx = 0, cy = 0, cz = 0;
+            const total = landmarks.length; // 468 points
+
+            for (let i = 0; i < total; i++) {
+                cx += landmarks[i].x;
+                cy += landmarks[i].y;
+                cz += landmarks[i].z;
+            }
+            cx /= total; cy /= total; cz /= total;
+
+            // Calculate Scale Factor (bounding scale/mean distance from centroid)
+            let scaleSum = 0;
+            const centered = [];
+
+            for (let i = 0; i < total; i++) {
+                const dx = landmarks[i].x - cx;
+                const dy = landmarks[i].y - cy;
+                const dz = landmarks[i].z - cz;
+                const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                scaleSum += dist;
+                centered.push({ x: dx, y: dy, z: dz });
+            }
+
+            const scale = scaleSum / total || 1;
+
+            // Flatten into normalized vector array [x0, y0, z0, x1, y1, z1, ...]
+            const vector = new Float32Array(total * 3);
+            for (let i = 0; i < total; i++) {
+                vector[i * 3]     = centered[i].x / scale;
+                vector[i * 3 + 1] = centered[i].y / scale;
+                vector[i * 3 + 2] = centered[i].z / scale;
+            }
+
+            return vector;
+        }
+
+        /**
+         * Calculate Euclidean Distance between two normalized 3D landmark feature vectors
+         */
+        function calculateVectorDistance(vecA, vecB) {
+            if (!vecA || !vecB || vecA.length !== vecB.length) return Infinity;
+            let sumSq = 0;
+            for (let i = 0; i < vecA.length; i++) {
+                const diff = vecA[i] - vecB[i];
+                sumSq += diff * diff;
+            }
+            return Math.sqrt(sumSq / (vecA.length / 3)); // Normalized root mean squared distance per 3D point
+        }
+
+        /**
+         * Compare live landmark vector against stored user embeddings
+         */
+        function recognizeFace(liveVector) {
+            if (enrolledUsers.length === 0 || !liveVector) return null;
+
+            let minDistance = Infinity;
+            let matchedUser = null;
+
+            for (const user of enrolledUsers) {
+                // Ensure array conversion
+                const storedVec = new Float32Array(user.vector);
+                const distance = calculateVectorDistance(liveVector, storedVec);
+
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    matchedUser = user;
+                }
+            }
+
+            // Similarity score representation (Inverse scale)
+            const similarity = Math.max(0, 1 - (minDistance / DISTANCE_THRESHOLD));
+
+            if (minDistance <= DISTANCE_THRESHOLD && matchedUser) {
+                return {
+                    user: matchedUser,
+                    distance: minDistance,
+                    similarity: similarity
+                };
+            }
+
+            return {
+                user: null,
+                distance: minDistance,
+                similarity: similarity
+            };
+        }
+
+        /**
+         * --------------------------------------------------------------------------
+         * MediaPipe FaceMesh Engine Initialization & Realtime Frame Callback
+         * --------------------------------------------------------------------------
+         */
+        function setupMediaPipe() {
+            const videoElement = document.getElementById('webcam');
+            const canvasElement = document.getElementById('outputCanvas');
+            const canvasCtx = canvasElement.getContext('2d');
+
+            faceMesh = new FaceMesh({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+            });
+
+            faceMesh.setOptions({
+                maxNumFaces: 1,
+                refineLandmarks: true,
+                minDetectionConfidence: 0.6,
+                minTrackingConfidence: 0.6
+            });
+
+            faceMesh.onResults((results) => {
+                // Resize canvas matching video dimensions
+                canvasElement.width = videoElement.videoWidth;
+                canvasElement.height = videoElement.videoHeight;
+
+                canvasCtx.save();
+                canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+                if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                    const landmarks = results.multiFaceLandmarks[0];
+
+                    // Process & Extract Feature Vector (468 points)
+                    currentLandmarksVector = normalizeFaceVector(landmarks);
+
+                    // Optional Mesh Rendering
+                    if (drawMeshEnabled) {
+                        drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, { color: '#6366f133', lineWidth: 0.8 });
+                        drawConnectors(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, { color: '#10b981', lineWidth: 1.2 });
+                        drawConnectors(canvasCtx, landmarks, FACEMESH_LEFT_EYE, { color: '#10b981', lineWidth: 1.2 });
+                        drawConnectors(canvasCtx, landmarks, FACEMESH_FACE_OVAL, { color: '#3b82f6', lineWidth: 1.5 });
+                    }
+
+                    // Real-time Recognition Logic
+                    const matchResult = recognizeFace(currentLandmarksVector);
+                    updateDetectionUI(matchResult);
+
+                    // Automatic Attendance Logging Logic
+                    if (matchResult && matchResult.user && autoAttendEnabled) {
+                        const userId = matchResult.user.id;
+                        const now = Date.now();
+                        const lastTime = lastAttendanceMap.get(userId) || 0;
+
+                        if (now - lastTime > COOLDOWN_MS) {
+                            lastAttendanceMap.set(userId, now);
+                            saveAttendanceLog(userId, matchResult.user.name, matchResult.similarity);
+                        }
+                    }
+
+                } else {
+                    currentLandmarksVector = null;
+                    updateDetectionUI(null);
+                }
+
+                canvasCtx.restore();
+            });
+
+            // Camera Utils setup
+            cameraInstance = new Camera(videoElement, {
+                onFrame: async () => {
+                    await faceMesh.send({ image: videoElement });
+                },
+                width: 640,
+                height: 480
+            });
+
+            cameraInstance.start()
+                .then(() => {
+                    document.getElementById('systemStatus').className = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+                    document.getElementById('systemStatus').innerHTML = `<span class="w-2 h-2 mr-1.5 bg-emerald-400 rounded-full"></span> AI & Kamera Aktif`;
+                    isFaceMeshReady = true;
+                    populateCameraSelect();
+                })
+                .catch(err => {
+                    console.error("Camera failed to start:", err);
+                    showToast("Kamera Gagal", "Gagal mengases kamera. Izinkan akses kamera di browser.", "danger");
+                });
+        }
+
+        /**
+         * Update Live Detection UI Card Overlay
+         */
+        function updateDetectionUI(result) {
+            const detectedName = document.getElementById('detectedName');
+            const detectedMatch = document.getElementById('detectedMatch');
+            const userAvatar = document.getElementById('userAvatar');
+
+            if (!result || !currentLandmarksVector) {
+                detectedName.textContent = "Menunggu Deteksi Wajah...";
+                detectedName.className = "font-bold text-sm text-slate-200";
+                detectedMatch.textContent = "Jarak Vektor: - | Akurasi: -";
+                userAvatar.textContent = "?";
+                userAvatar.className = "w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-slate-300 font-bold border border-slate-600";
+                return;
+            }
+
+            if (result.user) {
+                detectedName.textContent = `${result.user.name} (${result.user.id})`;
+                detectedName.className = "font-bold text-sm text-emerald-400";
+                detectedMatch.textContent = `Jarak: ${result.distance.toFixed(3)} | Akurasi: ${(result.similarity * 100).toFixed(1)}%`;
+                userAvatar.textContent = result.user.name.charAt(0).toUpperCase();
+                userAvatar.className = "w-10 h-10 rounded-full bg-emerald-600/30 text-emerald-300 flex items-center justify-center font-bold border border-emerald-500/50";
+            } else {
+                detectedName.textContent = "Wajah Tidak Dikenali";
+                detectedName.className = "font-bold text-sm text-amber-400";
+                detectedMatch.textContent = `Jarak Terdekat: ${result.distance === Infinity ? '-' : result.distance.toFixed(3)}`;
+                userAvatar.textContent = "!";
+                userAvatar.className = "w-10 h-10 rounded-full bg-amber-600/30 text-amber-300 flex items-center justify-center font-bold border border-amber-500/50";
+            }
+        }
+
+        /**
+         * Camera Device Switcher Helper
+         */
+        async function populateCameraSelect() {
+            const select = document.getElementById('cameraSelect');
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                
+                select.innerHTML = videoDevices.map((device, idx) => 
+                    `<option value="${device.deviceId}">${device.label || 'Kamera ' + (idx + 1)}</option>`
+                ).join('');
+
+                select.onchange = async (e) => {
+                    const deviceId = e.target.value;
+                    if (cameraInstance) {
+                        await cameraInstance.stop();
+                        const videoElement = document.getElementById('webcam');
+                        cameraInstance = new Camera(videoElement, {
+                            onFrame: async () => { await faceMesh.send({ image: videoElement }); },
+                            deviceId: deviceId,
+                            width: 640,
+                            height: 480
+                        });
+                        cameraInstance.start();
+                    }
+                };
+            } catch (err) {
+                console.warn('Cannot enumerate devices', err);
+            }
+        }
+
+        /**
+         * --------------------------------------------------------------------------
+         * UI Event Listeners & Handlers
+         * --------------------------------------------------------------------------
+         */
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Initialize IndexedDB
+            await initDB();
+            await loadUsers();
+            await renderAttendanceLogs();
+
+            // Initialize MediaPipe FaceMesh engine
+            setupMediaPipe();
+
+            // User Enrollment Form Submission
+            const enrollForm = document.getElementById('enrollForm');
+            enrollForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const id = document.getElementById('enrollId').value.trim();
+                const name = document.getElementById('enrollName').value.trim();
+                const dept = document.getElementById('enrollDept').value.trim();
+
+                if (!currentLandmarksVector) {
+                    showToast('Pendaftaran Gagal', 'Wajah tidak terdeteksi di kamera. Posisikan wajah dengan jelas.', 'warning');
+                    return;
+                }
+
+                // Check duplicate ID
+                const existing = enrolledUsers.find(u => u.id === id);
+                if (existing) {
+                    if (!confirm(`Pengguna dengan ID "${id}" sudah ada. Apakah Anda ingin memperbarui data wajah?`)) {
+                        return;
+                    }
+                }
+
+                // Convert Float32Array vector to standard Array for IndexedDB storage
+                const vectorArray = Array.from(currentLandmarksVector);
+
+                const newUser = {
+                    id: id,
+                    name: name,
+                    dept: dept,
+                    vector: vectorArray,
+                    created: new Date().toISOString()
+                };
+
+                try {
+                    await saveUserToDB(newUser);
+                    showToast('Pengguna Terdaftar', `Pengguna ${name} berhasil disimpan.`, 'success');
+                    enrollForm.reset();
+                } catch (err) {
+                    console.error('Error saving user:', err);
+                    showToast('Gagal Menyimpan', 'Terjadi kesalahan saat menyimpan ke IndexedDB.', 'danger');
+                }
+            });
+
+            // Toggle Mesh Visualizer
+            document.getElementById('toggleMeshBtn').addEventListener('click', () => {
+                drawMeshEnabled = !drawMeshEnabled;
+                const btn = document.getElementById('toggleMeshBtn');
+                btn.classList.toggle('bg-indigo-600', drawMeshEnabled);
+                btn.classList.toggle('bg-slate-700', !drawMeshEnabled);
+            });
+
+            // Toggle Auto Attendance Mode
+            document.getElementById('toggleAutoAttendBtn').addEventListener('click', () => {
+                autoAttendEnabled = !autoAttendEnabled;
+                const btn = document.getElementById('toggleAutoAttendBtn');
+                if (autoAttendEnabled) {
+                    btn.className = 'px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-xs text-white font-medium rounded-lg transition shadow-md shadow-indigo-600/20';
+                    btn.innerHTML = `<i class="fa-solid fa-bolt mr-1"></i> Auto Presensi: ON`;
+                } else {
+                    btn.className = 'px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-xs text-slate-300 font-medium rounded-lg transition border border-slate-600';
+                    btn.innerHTML = `<i class="fa-solid fa-pause mr-1"></i> Auto Presensi: OFF`;
+                }
+            });
+
+            // Export CSV & Clear Logs Buttons
+            document.getElementById('exportCsvBtn').addEventListener('click', exportToCSV);
+            document.getElementById('clearLogsBtn').addEventListener('click', clearAllLogs);
+        });
+
+        /**
+         * Notification Toast Helper Function
+         */
+        function showToast(title, message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const toastTitle = document.getElementById('toastTitle');
+            const toastMsg = document.getElementById('toastMsg');
+            const toastIcon = document.getElementById('toastIcon');
+
+            toastTitle.textContent = title;
+            toastMsg.textContent = message;
+
+            if (type === 'success') {
+                toastIcon.className = 'fa-solid fa-circle-check text-emerald-400 text-lg';
+            } else if (type === 'warning') {
+                toastIcon.className = 'fa-solid fa-triangle-exclamation text-amber-400 text-lg';
+            } else if (type === 'danger') {
+                toastIcon.className = 'fa-solid fa-circle-xmark text-rose-400 text-lg';
+            } else {
+                toastIcon.className = 'fa-solid fa-circle-info text-indigo-400 text-lg';
+            }
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3500);
+        }
+
+        /**
+         * Helper to escape HTML characters
+         */
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+    </script>
+</body>
+</html>
